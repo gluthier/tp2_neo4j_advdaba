@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j:latest
+    container_name: advdaba_labo2
+    ports:
+      - "7474:7474"   # HTTP browser access
+      - "7687:7687"   # Bolt protocol for drivers
+    environment:
+      - NEO4J_AUTH=neo4j/testtest
+    volumes:
+      - ./data:/data
+      - ./logs:/logs
+      - ./import:/var/lib/neo4j/import
+    restart: unless-stopped
+    mem_limit: 3g
