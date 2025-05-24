@@ -7,19 +7,25 @@ uri = "bolt://localhost:7687"
 user = "neo4j"
 password = "testtest"
 
-INPUT_FILE = "import/test.json"
+INPUT_FILE = "import/biggertest.json"
 
 driver = GraphDatabase.driver(uri, auth=(user, password))
 
 def create_graph(tx, paper):
-    # Create ARTICLE node
+    if '_id' not in paper or 'title' not in paper:
+        print(f"Skipping article due to missing keys: {paper.keys()}")
+        return
+    
     tx.run("""
         MERGE (a:ARTICLE {_id: $pid})
         SET a.title = $title
     """, pid=paper['_id'], title=paper['title'])
 
-    # Create AUTHOR nodes and AUTHORED relationships
     for author in paper.get('authors', []):
+        if '_id' not in author or 'name' not in author:
+            print(f"Skipping author due to missing keys: {author}")
+            continue
+
         tx.run("""
             MERGE (au:AUTHOR {_id: $aid})
             SET au.name = $name
@@ -27,7 +33,6 @@ def create_graph(tx, paper):
             MERGE (au)-[:AUTHORED]->(a)
         """, aid=author['_id'], name=author['name'], pid=paper['_id'])
 
-    # Create CITES relationships to other ARTICLE nodes
     for ref in paper.get('references', []):
         tx.run("""
             MERGE (a1:ARTICLE {_id: $pid})
@@ -39,7 +44,6 @@ def clean_extended_json(text):
     text = re.sub(r'Number(Int|Long)?\((\d+)\)', r'\2', text)
     text = re.sub(r'ObjectId\("([^"]+)"\)', r'"\1"', text)
     text = re.sub(r'ISODate\("([^"]+)"\)', r'"\1"', text)
-    # Quote unquoted keys (e.g., _id: → "_id":
     text = re.sub(r'([{,])\s*([a-zA-Z0-9_]+)\s*:', r'\1 "\2":', text)
     return text
 
@@ -52,11 +56,6 @@ def stream_articles(file_path):
         for line in f:
             line = line.strip()
 
-            # Skip JSON array brackets or commas separating objects
-            if line in {"[", "]", ","}:
-                continue
-
-            # Start of a JSON object
             if "{" in line:
                 depth += line.count("{")
                 inside_object = True
@@ -67,14 +66,11 @@ def stream_articles(file_path):
             if "}" in line:
                 depth -= line.count("}")
                 if depth == 0:
-                    # Clean and parse single object
-                    cleaned = clean_extended_json(buf.strip().rstrip(","))
+                    cleaned = clean_extended_json(buf.strip().rstrip(","))                            
                     try:
                         yield json.loads(cleaned)
                     except Exception as e:
-                        print(f"❌ Failed to parse article: {e}")
-                        # Uncomment to debug:
-                        # print(cleaned)
+                        print(f"Failed to parse article: {e}")
                     buf = ""
                     inside_object = False
 
@@ -85,10 +81,10 @@ for article in stream_articles(INPUT_FILE):
             session.execute_write(create_graph, article)
         count += 1
         if count % 100 == 0:
-            print(f"✅ Imported {count} articles...")
+            print(f"Imported {count} articles...")
     except Exception as e:
-        print(f"❌ Failed to import article #{count}: {e}")
+        print(f"Failed to import article #{count}: {e}")
 
-print(f"✅ DONE: Imported {count} articles total.")
+print(f"DONE: Imported {count} articles total.")
 
 driver.close()
