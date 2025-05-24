@@ -1,4 +1,5 @@
 from neo4j import GraphDatabase
+import argparse
 import json
 import re
 
@@ -7,7 +8,7 @@ uri = "bolt://localhost:7687"
 user = "neo4j"
 password = "testtest"
 
-INPUT_FILE = "import/biggertest.json"
+DEFAULT_INPUT_FILE = "import/biggertest.json"
 
 driver = GraphDatabase.driver(uri, auth=(user, password))
 
@@ -47,11 +48,12 @@ def clean_extended_json(text):
     text = re.sub(r'([{,])\s*([a-zA-Z0-9_]+)\s*:', r'\1 "\2":', text)
     return text
 
-def stream_articles(file_path):
+def stream_articles(file_path, max_articles):
     with open(file_path, "r", encoding="utf-8") as f:
         buf = ""
         depth = 0
         inside_object = False
+        count = 0
 
         for line in f:
             line = line.strip()
@@ -69,22 +71,36 @@ def stream_articles(file_path):
                     cleaned = clean_extended_json(buf.strip().rstrip(","))                            
                     try:
                         yield json.loads(cleaned)
+                        count += 1
+                        if max_articles is not None and count >= max_articles:
+                            break
                     except Exception as e:
                         print(f"Failed to parse article: {e}")
                     buf = ""
                     inside_object = False
 
-count = 0
-for article in stream_articles(INPUT_FILE):
-    try:
-        with driver.session() as session:
-            session.execute_write(create_graph, article)
-        count += 1
-        if count % 100 == 0:
-            print(f"Imported {count} articles...")
-    except Exception as e:
-        print(f"Failed to import article #{count}: {e}")
 
-print(f"DONE: Imported {count} articles total.")
+def main():
+    parser = argparse.ArgumentParser(description="Import articles into Neo4j")
+    parser.add_argument('--input', type=str, default=DEFAULT_INPUT_FILE, help='Input JSON file path')
+    parser.add_argument('--n', type=int, default=None, help='Optional number of articles to import (default: all)')	
+    args = parser.parse_args()
 
-driver.close()
+    count = 0
+    for article in stream_articles(args.input, args.n):
+        try:
+            with driver.session() as session:
+                session.execute_write(create_graph, article)
+            count += 1
+            if count % 100 == 0:
+                print(f"Imported {count} articles...")
+        except Exception as e:
+            print(f"Failed to import article #{count}: {e}")
+
+    print(f"DONE: Imported {count} articles total.")
+
+    driver.close()
+
+
+if __name__ == '__main__':
+    main()
